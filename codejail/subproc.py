@@ -7,9 +7,15 @@ import resource
 import subprocess
 import threading
 import time
+import requests
+
+try:
+    from lms.envs.common import NAVOICA_SANDBOX
+    from lms.envs.common import NAVOICA_SANDBOX_URL
+except ImportError:
+    NAVOICA_SANDBOX = False
 
 log = logging.getLogger("codejail")
-
 
 def run_subprocess(
     cmd, stdin=None, cwd=None, env=None, rlimits=None, realtime=None,
@@ -36,22 +42,36 @@ def run_subprocess(
     the stdout and stderr of the process, as strings.
 
     """
-    subproc = subprocess.Popen(
-        cmd, cwd=cwd, env=env,
-        preexec_fn=functools.partial(set_process_limits, rlimits or ()),
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
 
-    if slug:
-        log.info("Executed jailed code %s in %s, with PID %s", slug, cwd, subproc.pid)
+    if NAVOICA_SANDBOX:
+        url = NAVOICA_SANDBOX_URL
+        r = requests.post(url, json=stdin)
+        stdout = json.dumps(r.json)
+        stderr = r.status_code
+        return_code = r.status_code
 
-    # Start the time killer thread.
-    if realtime:
-        killer = ProcessKillerThread(subproc, limit=realtime)
-        killer.start()
+        # Difference between popen and http requests
+        if return_code == 200:
+            return_code = 0
 
-    stdout, stderr = subproc.communicate(stdin)
-    return subproc.returncode, stdout, stderr
+    else:
+        subproc = subprocess.Popen(
+            cmd, cwd=cwd, env=env,
+            preexec_fn=functools.partial(set_process_limits, rlimits or ()),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+
+        if slug:
+            log.info("Executed jailed code %s in %s, with PID %s", slug, cwd, subproc.pid)
+
+        # Start the time killer thread.
+        if realtime:
+            killer = ProcessKillerThread(subproc, limit=realtime)
+            killer.start()
+
+        stdout, stderr = subproc.communicate(stdin)
+        return_code = subproc.returncode
+    return return_code, stdout, stderr
 
 
 def set_process_limits(rlimits):       # pragma: no cover
