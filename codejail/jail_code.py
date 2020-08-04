@@ -6,10 +6,18 @@ import os.path
 import resource
 import shutil
 import sys
+import requests
+import json
 
 from .proxy import run_subprocess_through_proxy
 from .subproc import run_subprocess
 from .util import temp_directory
+
+try:
+    from lms.envs.common import NAVOICA_SANDBOX
+    from lms.envs.common import NAVOICA_SANDBOX_URL
+except ImportError:
+    NAVOICA_SANDBOX = False
 
 log = logging.getLogger("codejail")
 
@@ -165,98 +173,117 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
         .status: exit status of the process: an int, 0 for success
 
     """
-    if not is_configured(command):
-        raise Exception("jail_code needs to be configured for %r" % command)
 
-    # We make a temp directory to serve as the home of the sandboxed code.
-    # It has a writable "tmp" directory within it for temp files.
+    if NAVOICA_SANDBOX:
+        url = NAVOICA_SANDBOX_URL
+        r = requests.post(url, json=stdin)
+        stdout = json.dumps(r.json())
+        stderr = r.status_code
+        return_code = r.status_code
 
-    with temp_directory() as homedir:
-
-        # Make directory readable by other users ('sandbox' user needs to be
-        # able to read it).
-        os.chmod(homedir, 0775)
-
-        # Make a subdir to use for temp files, world-writable so that the
-        # sandbox user can write to it.
-        tmptmp = os.path.join(homedir, "tmp")
-        os.mkdir(tmptmp)
-        os.chmod(tmptmp, 0777)
-
-        argv = argv or []
-
-        # All the supporting files are copied into our directory.
-        for filename in files or ():
-            dest = os.path.join(homedir, os.path.basename(filename))
-            if os.path.islink(filename):
-                os.symlink(os.readlink(filename), dest)
-            elif os.path.isfile(filename):
-                shutil.copy(filename, homedir)
-            else:
-                shutil.copytree(filename, dest, symlinks=True)
-
-        # Create the main file.
-        if code:
-            with open(os.path.join(homedir, "jailed_code"), "wb") as jailed:
-                jailed.write(code)
-
-            argv = ["jailed_code"] + argv
-
-        # Create extra files requested by the caller:
-        for name, content in extra_files or ():
-            with open(os.path.join(homedir, name), "wb") as extra:
-                extra.write(content)
-
-        cmd = []
-        rm_cmd = []
-
-        # Build the command to run.
-        user = COMMANDS[command]['user']
-        if user:
-            # Run as the specified user
-            cmd.extend(['sudo', '-u', user])
-            rm_cmd.extend(['sudo', '-u', user])
-
-        # Point TMPDIR at our temp directory.
-        cmd.extend(['TMPDIR=tmp'])
-        # Start with the command line dictated by "python" or whatever.
-        cmd.extend(COMMANDS[command]['cmdline_start'])
-
-        # Add the code-specific command line pieces.
-        cmd.extend(argv)
-
-        # Use the configuration and maybe an environment variable to determine
-        # whether to use a proxy process.
-        use_proxy = LIMITS["PROXY"]
-        if use_proxy is None:
-            use_proxy = int(os.environ.get("CODEJAIL_PROXY", "0"))
-        if use_proxy:
-            run_subprocess_fn = run_subprocess_through_proxy
-        else:
-            run_subprocess_fn = run_subprocess
-
-        # Run the subprocess.
-        status, stdout, stderr = run_subprocess_fn(
-            cmd=cmd, cwd=homedir, env={}, slug=slug,
-            stdin=stdin,
-            realtime=LIMITS["REALTIME"], rlimits=create_rlimits(),
-            )
+        # Difference between popen and http requests
+        if return_code == 200:
+            return_code = 0
 
         result = JailResult()
-        result.status = status
+        result.status = return_code
         result.stdout = stdout
-        result.stderr = stderr
+        result.stderr = ''
 
-        # Remove the tmptmp directory as the sandbox user since the sandbox
-        # user may have written files that the application user can't delete.
-        rm_cmd.extend([
-            '/usr/bin/find', tmptmp,
-            '-mindepth', '1', '-maxdepth', '1',
-            '-exec', 'rm', '-rf', '{}', ';'
-        ])
+    else:
 
-        # Run the rm command subprocess.
-        run_subprocess_fn(rm_cmd, cwd=homedir)
+        if not is_configured(command):
+            raise Exception("jail_code needs to be configured for %r" % command)
+
+        # We make a temp directory to serve as the home of the sandboxed code.
+        # It has a writable "tmp" directory within it for temp files.
+
+        with temp_directory() as homedir:
+
+            # Make directory readable by other users ('sandbox' user needs to be
+            # able to read it).
+            os.chmod(homedir, 0775)
+
+            # Make a subdir to use for temp files, world-writable so that the
+            # sandbox user can write to it.
+            tmptmp = os.path.join(homedir, "tmp")
+            os.mkdir(tmptmp)
+            os.chmod(tmptmp, 0777)
+
+            argv = argv or []
+
+            # All the supporting files are copied into our directory.
+            for filename in files or ():
+                dest = os.path.join(homedir, os.path.basename(filename))
+                if os.path.islink(filename):
+                    os.symlink(os.readlink(filename), dest)
+                elif os.path.isfile(filename):
+                    shutil.copy(filename, homedir)
+                else:
+                    shutil.copytree(filename, dest, symlinks=True)
+
+            # Create the main file.
+            if code:
+                with open(os.path.join(homedir, "jailed_code"), "wb") as jailed:
+                    jailed.write(code)
+
+                argv = ["jailed_code"] + argv
+
+            # Create extra files requested by the caller:
+            for name, content in extra_files or ():
+                with open(os.path.join(homedir, name), "wb") as extra:
+                    extra.write(content)
+
+            cmd = []
+            rm_cmd = []
+
+            # Build the command to run.
+            user = COMMANDS[command]['user']
+            if user:
+                # Run as the specified user
+                cmd.extend(['sudo', '-u', user])
+                rm_cmd.extend(['sudo', '-u', user])
+
+            # Point TMPDIR at our temp directory.
+            cmd.extend(['TMPDIR=tmp'])
+            # Start with the command line dictated by "python" or whatever.
+            cmd.extend(COMMANDS[command]['cmdline_start'])
+
+            # Add the code-specific command line pieces.
+            cmd.extend(argv)
+
+            # Use the configuration and maybe an environment variable to determine
+            # whether to use a proxy process.
+            use_proxy = LIMITS["PROXY"]
+            if use_proxy is None:
+                use_proxy = int(os.environ.get("CODEJAIL_PROXY", "0"))
+            if use_proxy:
+                run_subprocess_fn = run_subprocess_through_proxy
+            else:
+                run_subprocess_fn = run_subprocess
+
+            # Run the subprocess.
+            status, stdout, stderr = run_subprocess_fn(
+                cmd=cmd, cwd=homedir, env={}, slug=slug,
+                stdin=stdin,
+                realtime=LIMITS["REALTIME"], rlimits=create_rlimits(),
+                )
+
+            result = JailResult()
+            result.status = status
+            result.stdout = stdout
+            result.stderr = stderr
+
+            # Remove the tmptmp directory as the sandbox user since the sandbox
+            # user may have written files that the application user can't delete.
+            rm_cmd.extend([
+                '/usr/bin/find', tmptmp,
+                '-mindepth', '1', '-maxdepth', '1',
+                '-exec', 'rm', '-rf', '{}', ';'
+            ])
+
+            # Run the rm command subprocess.
+            run_subprocess_fn(rm_cmd, cwd=homedir)
 
     return result
 
