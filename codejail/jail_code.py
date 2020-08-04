@@ -1,5 +1,6 @@
 """Run code in a jail."""
 
+from django.conf import settings
 import logging
 import os
 import os.path
@@ -12,12 +13,6 @@ import json
 from .proxy import run_subprocess_through_proxy
 from .subproc import run_subprocess
 from .util import temp_directory
-
-try:
-    from lms.envs.common import NAVOICA_SANDBOX
-    from lms.envs.common import NAVOICA_SANDBOX_URL
-except ImportError:
-    NAVOICA_SANDBOX = False
 
 log = logging.getLogger("codejail")
 
@@ -174,8 +169,8 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
 
     """
 
-    if NAVOICA_SANDBOX:
-        url = NAVOICA_SANDBOX_URL
+    if settings.NAVOICA_SANDBOX:
+        url = settings.NAVOICA_SANDBOX_URL
         r = requests.post(url, json=stdin)
         stdout = json.dumps(r.json())
         stderr = r.status_code
@@ -188,7 +183,7 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
         result = JailResult()
         result.status = return_code
         result.stdout = stdout
-        result.stderr = ''
+        result.stderr = '' #TODO , add error message from python interpreter
 
     else:
 
