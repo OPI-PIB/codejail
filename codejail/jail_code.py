@@ -173,8 +173,13 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
         url = settings.NAVOICA_SANDBOX_URL
         r = requests.post(url, json=stdin)
         stdout = json.dumps(r.json())
-        stderr = r.status_code
         return_code = r.status_code
+        stderr = ''
+        if 'error_tb' in r.json().keys():
+            stderr = r.json()['error_tb']
+            return_code = -12
+            stdout = ''
+
 
         # Difference between popen and http requests
         if return_code == 200:
@@ -183,7 +188,7 @@ def jail_code(command, code=None, files=None, extra_files=None, argv=None,
         result = JailResult()
         result.status = return_code
         result.stdout = stdout
-        result.stderr = '' #TODO , add error message from python interpreter
+        result.stderr = stderr
 
     else:
 
