@@ -65,8 +65,12 @@ def is_configured(command):
 if hasattr(sys, 'real_prefix'):
     if os.path.isdir(sys.prefix + "-sandbox"):
         configure("python", sys.prefix + "-sandbox/bin/python", "sandbox")
-
-
+# needed for static_content, because in this case,  does not have access to project settings
+try:
+    if settings.NAVOICA_SANDBOX:
+        configure("navoica-sandbox", None, None)
+except AttributeError:
+    pass
 # Configurable limits
 
 LIMITS = {

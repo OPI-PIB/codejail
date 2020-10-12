@@ -155,7 +155,7 @@ def safe_exec(code, globals_dict, files=None, python_path=None, slug=None,
             "Couldn't execute jailed code: stdout: {res.stdout!r}, "
             "stderr: {res.stderr!r} with status code: {res.status}"
         ).format(res=res))
- 
+
     globals_dict.update(json.loads(res.stdout))
 
 
@@ -234,7 +234,7 @@ def not_safe_exec(code, globals_dict, files=None, python_path=None, slug=None,
 
 # If the developer wants us to be unsafe (ALWAYS_BE_UNSAFE), or if there isn't
 # a configured jail for Python, then we'll be UNSAFE.
-UNSAFE = ALWAYS_BE_UNSAFE or not jail_code.is_configured("python")
+UNSAFE = ALWAYS_BE_UNSAFE or not (jail_code.is_configured("python") or jail_code.is_configured("navoica-sandbox"))
 
 if UNSAFE:   # pragma: no cover
     # Make safe_exec actually call not_safe_exec, but log that we're doing so.
